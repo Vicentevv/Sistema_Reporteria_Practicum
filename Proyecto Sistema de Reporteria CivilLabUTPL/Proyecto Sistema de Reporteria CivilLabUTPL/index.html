@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte Construcción Civil</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 1rem; }
+    button { margin: 0.5rem 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem; }
+    th { background-color: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h2>Reporte de Usuarios y Retos - Construcción Civil</h2>
+  <label for="tipo-reporte">Tipo de reporte:</label>
+  <select id="tipo-reporte">
+    <option value="intentos">Intentos por Reto</option>
+    <option value="usuarios">Usuarios</option>
+    <option value="resumen">Resumen por Usuario</option>
+  </select>
+  <button id="btn-cargar">Cargar Datos</button>
+  <button id="btn-exportar" disabled>Exportar a Excel</button>
+  <div id="contenedor-tabla"></div>
+
+  <script type="module">
+    import { obtenerDatosNormalizados, obtenerUsuarios, obtenerResumen } from './civil-fetch.js';
+    import { mostrarTabla, exportarXLSX } from './civil-render-xlsx.js';
+
+    let datos = [];
+    let tipoReporte = 'intentos';
+
+    document.getElementById('tipo-reporte').addEventListener('change', async (e) => {
+      tipoReporte = e.target.value;
+      await cargarYMostrar();
+    });
+
+    document.getElementById('btn-cargar').addEventListener('click', async () => {
+      await cargarYMostrar();
+    });
+
+    async function cargarYMostrar() {
+      if (tipoReporte === 'usuarios') {
+        datos = await obtenerUsuarios();
+      } else if (tipoReporte === 'resumen') {
+        datos = await obtenerResumen();
+      } else {
+        datos = await obtenerDatosNormalizados();
+      }
+      mostrarTabla(datos, document.getElementById('contenedor-tabla'));
+      document.getElementById('btn-exportar').disabled = datos.length === 0;
+    }
+
+    document.getElementById('btn-exportar').addEventListener('click', () => {
+      exportarXLSX("reporte_civil", datos);
+    });
+  </script>
+</body>
+</html>
