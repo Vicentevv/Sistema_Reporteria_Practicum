@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Reporte Psicología</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script type="module">
+    import { obtenerPracticas, obtenerPines } from './psico-fetch.js';
+    import { generarTabla, generarXLSX } from './psico-render-xlsx.js';
+
+    const selector = document.getElementById("selector-practica");
+    const btnDescargar = document.getElementById("descargar-btn");
+    const btnTodos = document.getElementById("descargar-todos-btn");
+    const contenedorTabla = document.getElementById("contenedor-tabla");
+    const totalTexto = document.getElementById("total-practicas");
+    const btnResumen = document.getElementById("ver-resumen-btn");
+    const contenedorResumen = document.getElementById("contenedor-resumen");
+
+    let practices = {};
+    let resumenVisible = false;
+
+    // NUEVO: Cargar Pines además de Practices
+    let pins = {};
+
+    // Modifica main para cargar practices y pins
+    async function main() {
+      practices = await obtenerPracticas();
+      pins = await obtenerPines();
+
+      if (!practices || Object.keys(practices).length === 0) {
+        totalTexto.textContent = "No se encontraron prácticas.";
+        return;
+      }
+
+      totalTexto.textContent = `Total de prácticas encontradas: ${Object.keys(practices).length}`;
+      selector.innerHTML = '<option value="">-- Selecciona una práctica --</option>' +
+        Object.keys(practices).map(p => `<option value="${p}">Práctica: ${p}</option>`).join('');
+      btnTodos.disabled = false;
+      btnResumen.disabled = false;
+    }
+
+    btnResumen.addEventListener("click", () => {
+      resumenVisible = !resumenVisible;
+      if (resumenVisible) {
+        contenedorTabla.innerHTML = "";
+        mostrarResumenTabla();
+      } else {
+        contenedorResumen.innerHTML = "";
+      }
+    });
+
+    // Modifica mostrarResumenTabla para incluir info de Pines
+    function mostrarResumenTabla() {
+      let tabla = `<h3>📋 Tabla resumen de prácticas</h3>
+      <table>
+        <tr>
+          <th>Código</th>
+          <th>Descripción</th>
+          <th>Autor</th>
+          <th>Clave</th>
+          <th>Estudiantes</th>
+          <th>Total intentos</th>
+          <th>Promedio general</th>
+          <th>% de logro promedio</th>
+        </tr>`;
+      for (const clave in practices) {
+        const estudiantes = practices[clave];
+        let totalIntentos = 0, sumaNotas = 0, sumaPorcentajes = 0, contadorNotas = 0;
+        for (const username in estudiantes) {
+          const est = estudiantes[username];
+          const intentos = est.attempts?.length ? est.attempts : est.skinner || [];
+          for (const intento of intentos) {
+            if (!intento) continue;
+            totalIntentos++;
+            if (intento.average != null) {
+              sumaNotas += intento.average;
+              contadorNotas++;
+            }
+            if (intento.porcentage != null) {
+              sumaPorcentajes += intento.porcentage;
+            }
+          }
+        }
+        const numEstudiantes = Object.keys(estudiantes).length;
+        const promedio = contadorNotas ? (sumaNotas / contadorNotas).toFixed(2) : '-';
+        const promedioPorcentaje = totalIntentos ? (sumaPorcentajes / totalIntentos).toFixed(2) + '%' : '-';
+
+        // Info de Pines
+        const pin = pins[clave] || {};
+        // CAMBIO: Si no hay descripción, poner "Sin descripción"
+        const descripcion = (pin.descriptionPin && pin.descriptionPin.trim()) ? pin.descriptionPin : 'Sin descripción';
+        const autor = pin.autorPin ?? '-';
+        const clavePin = pin.keyPin ?? '-';
+
+        tabla += `<tr>
+          <td>${clave}</td>
+          <td>${descripcion}</td>
+          <td>${autor}</td>
+          <td>${clavePin}</td>
+          <td>${numEstudiantes}</td>
+          <td>${totalIntentos}</td>
+          <td>${promedio}</td>
+          <td>${promedioPorcentaje}</td>
+        </tr>`;
+      }
+      tabla += "</table>";
+      contenedorResumen.innerHTML = tabla;
+    }
+
+    // Al seleccionar una práctica, muestra info arriba de la tabla y dos tablas: resumen y detalle
+    selector.addEventListener("change", () => {
+      contenedorResumen.innerHTML = "";
+      resumenVisible = false;
+      const clave = selector.value;
+      if (clave) {
+        // Info Pines
+        const pin = pins[clave] || {};
+        // CAMBIO: Si no hay descripción, poner "Sin descripción"
+        const descripcion = (pin.descriptionPin && pin.descriptionPin.trim()) ? pin.descriptionPin : 'Sin descripción';
+        const autor = pin.autorPin ?? '-';
+        const clavePin = pin.keyPin ?? '-';
+        contenedorTabla.innerHTML = `
+          <div style="margin-bottom:1em;padding:0.5em;background:#f8f8f8;border:1px solid #ddd;">
+            <strong>Descripción:</strong> ${descripcion} <br>
+            <strong>Autor:</strong> ${autor} <br>
+            <strong>Clave:</strong> ${clavePin}
+          </div>
+          <div id="tabla-estudiantes"></div>
+          <div id="tabla-intentos"></div>
+        `;
+        // Generar tabla resumen de estudiantes
+        generarTablaEstudiantes(clave, practices[clave], document.getElementById('tabla-estudiantes'));
+        // Generar tabla de todos los intentos
+        generarTablaConGuiones(clave, practices[clave], document.getElementById('tabla-intentos'));
+        btnDescargar.disabled = false;
+        btnDescargar.onclick = () => generarXLSX(clave, practices[clave]);
+      } else {
+        contenedorTabla.innerHTML = "";
+        btnDescargar.disabled = true;
+      }
+    });
+
+    btnTodos.addEventListener("click", async () => {
+      for (const clave of Object.keys(practices)) {
+        await new Promise(resolve => {
+          setTimeout(() => {
+            generarXLSX(clave, practices[clave]);
+            resolve();
+          }, 300);
+        });
+      }
+    });
+
+    // Tabla resumen de estudiantes: un registro por estudiante
+    function generarTablaEstudiantes(clave, estudiantes, contenedor) {
+      const rows = [];
+      for (const username in estudiantes) {
+        const est = estudiantes[username];
+        const nombres = est.nameUser || '-';
+        const apellidos = est.lastNameUser || '-';
+        const intentos = est.attempts?.length ? est.attempts : est.skinner || [];
+        let totalIntentos = 0, sumaNotas = 0, sumaPorcentajes = 0, contadorNotas = 0;
+        intentos.forEach(i => {
+          if (!i) return;
+          totalIntentos++;
+          if (i.average != null) {
+            sumaNotas += i.average;
+            contadorNotas++;
+          }
+          if (i.porcentage != null) {
+            sumaPorcentajes += i.porcentage;
+          }
+        });
+        const promedio = contadorNotas ? (sumaNotas / contadorNotas).toFixed(2) : '-';
+        const promedioPorcentaje = totalIntentos ? (sumaPorcentajes / totalIntentos).toFixed(2) + '%' : '-';
+        rows.push([
+          username,
+          nombres,
+          apellidos,
+          totalIntentos,
+          promedio,
+          promedioPorcentaje
+        ]);
+      }
+      const tablaHTML = `
+        <h4>Resumen de estudiantes</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th><th>Nombres</th><th>Apellidos</th><th>Total intentos</th><th>Promedio</th><th>% de logro promedio</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => `<tr>${row.map(d => `<td>${d}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      `;
+      contenedor.innerHTML = tablaHTML;
+    }
+
+    // Nueva función para mostrar guiones en vez de celdas vacías
+    function generarTablaConGuiones(clave, estudiantes, contenedor) {
+      const rows = [];
+      for (const username in estudiantes) {
+        const est = estudiantes[username];
+        const nombres = est.nameUser || '-';
+        const apellidos = est.lastNameUser || '-';
+        const intentos = est.attempts?.length ? est.attempts : est.skinner || [];
+        intentos.forEach((i, idx) => {
+          if (!i) return;
+          rows.push([
+            username,
+            nombres,
+            apellidos,
+            idx + 1,
+            i.average ?? '-',
+            i.dateDone ?? '-',
+            i.errorF1_Acquisition1 ?? '-',
+            i.errorF2_Acquisition2 ?? '-',
+            i.errorF3_Conditioning ?? i.error_Conditioning ?? '-',
+            i.porcentage ?? '-',
+            i.startTime ?? '-',
+            i.state ?? '-',
+            i.timeSpent ?? '-'
+          ]);
+        });
+      }
+      const tablaHTML = `
+        <h4>Todos los intentos de los estudiantes</h4>
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th><th>Nombres</th><th>Apellidos</th><th># Intento</th><th>Promedio</th><th>Fecha</th>
+              <th>Error F1</th><th>Error F2</th><th>Error F3</th><th>%</th><th>Inicio</th><th>Estado</th><th>Duración</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(row => `<tr>${row.map(d => `<td>${d}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      `;
+      contenedor.innerHTML = tablaHTML;
+    }
+
+    main();
+  </script>
+  <style>
+    body { font-family: sans-serif; padding: 1rem; }
+    select, button { margin: 0.5rem 0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; }
+    th { background-color: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h2>Seleccionar práctica</h2>
+  <button id="ver-resumen-btn" disabled>📊 Ver resumen de prácticas</button>
+  <div id="contenedor-resumen"></div>
+  <select id="selector-practica">
+    <option value="">-- Selecciona una práctica --</option>
+  </select>
+  <button id="descargar-btn" disabled>Descargar XLSX</button>
+  <button id="descargar-todos-btn" disabled>Descargar todas las prácticas (.xlsx)</button>
+  <div id="contenedor-tabla"></div>
+  <p id="total-practicas"></p>
+</body>
+</html>
